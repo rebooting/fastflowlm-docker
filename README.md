@@ -26,6 +26,10 @@ into a minimal container that talks directly to the NPU.
 
 ## Supported hardware
 
+Tested on a Framework Desktop running Fedora 44 with SELinux enforcing. The
+Docker image built successfully, and FastFlowLM loaded `gemma4-it:12b` and
+started its API server.
+
 Any AMD processor with an XDNA/XDNA2 NPU, including:
 - Ryzen AI 9 HX 370/375 (Strix Point — XDNA2)
 - Ryzen AI 9 HX 395 (Strix Halo — XDNA2)
