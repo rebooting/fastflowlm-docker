@@ -81,13 +81,13 @@ The resulting image is ~440MB (3-stage build, runtime-only).
 docker run --rm fastflowlm list
 
 # Download a model (mount cache so it persists)
-docker run --rm -v ~/.config/flm:/root/.config/flm fastflowlm pull llama3.2:1b
+docker run --rm -v "$HOME/.config/flm:/root/.config/flm:z" fastflowlm pull llama3.2:1b
 
 # Chat with the model on your NPU
 docker run -it --rm \
   --device=/dev/accel/accel0 \
   --ulimit memlock=-1:-1 \
-  -v ~/.config/flm:/root/.config/flm \
+  -v "$HOME/.config/flm:/root/.config/flm:z" \
   fastflowlm run llama3.2:1b
 
 # Validate NPU setup
@@ -95,15 +95,57 @@ docker run --rm \
   --device=/dev/accel/accel0 \
   --ulimit memlock=-1:-1 \
   fastflowlm validate
+```
 
-# Run OpenAI-compatible API server on port 8000
+On SELinux systems such as Fedora 44, the `:z` suffix labels `~/.config/flm`
+so the pull, chat, and server containers can share the cache. On hosts without
+SELinux, you can omit `:z`. [Docker bind mount documentation](https://docs.docker.com/engine/storage/bind-mounts/#configure-the-selinux-label)
+
+### Serve the local API
+
+This example serves `gemma4-it:12b`. You can substitute another model tag in
+both commands.
+
+```bash
+docker run --rm -v "$HOME/.config/flm:/root/.config/flm:z" \
+  fastflowlm pull gemma4-it:12b
+
 docker run -d --rm \
+  --name fastflowlm \
   --device=/dev/accel/accel0 \
   --ulimit memlock=-1:-1 \
-  -v ~/.config/flm:/root/.config/flm \
-  -p 8000:8000 \
-  fastflowlm serve
+  -v "$HOME/.config/flm:/root/.config/flm:z" \
+  -p 127.0.0.1:8000:52625 \
+  fastflowlm serve gemma4-it:12b --host 0.0.0.0 --port 52625
 ```
+
+`--host 0.0.0.0` lets Docker reach the server inside the container. The published
+port is bound to `127.0.0.1` on the host, so the API is local to your machine.
+Check `docker logs fastflowlm` and wait for `WebServer started`, then run:
+
+```bash
+curl -fsS http://127.0.0.1:8000/v1/models
+```
+
+### Chat in a browser with Open WebUI
+
+FastFlowLM serves an OpenAI-compatible API. Open WebUI provides the browser chat
+and saves chat history in the `open-webui` Docker volume. With FastFlowLM running
+as shown above, start Open WebUI on the same Linux host:
+
+```bash
+docker run -d --name open-webui --network host \
+  -e HOST=127.0.0.1 -e PORT=3000 \
+  -v open-webui:/app/backend/data \
+  ghcr.io/open-webui/open-webui:main
+```
+
+1. Open [http://127.0.0.1:3000](http://127.0.0.1:3000) and create the local admin account.
+2. In **Admin Settings → Connections**, add an **OpenAI API** connection. Set the base URL to `http://127.0.0.1:8000/v1` and authentication to **None**.
+3. Save the connection, open a new chat, and select `gemma4-it:12b` or the model you served.
+
+Host networking lets Open WebUI reach the local FastFlowLM API. `HOST=127.0.0.1`
+keeps the chat page local as well. [Open WebUI connection guide](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/)
 
 ## Benchmarks
 
@@ -170,12 +212,12 @@ public domain, trimmed to 30s at the 9-minute mark).
 docker run -d --rm \
   --device=/dev/accel/accel0 \
   --ulimit memlock=-1:-1 \
-  -v ~/.config/flm:/root/.config/flm \
-  -p 52625:52625 \
-  fastflowlm serve gemma3:1b --asr 1
+  -v "$HOME/.config/flm:/root/.config/flm:z" \
+  -p 127.0.0.1:52625:52625 \
+  fastflowlm serve gemma3:1b --asr 1 --host 0.0.0.0 --port 52625
 
 # Transcribe an audio file (OpenAI-compatible API)
-curl -s http://localhost:52625/v1/audio/transcriptions \
+curl -fsS http://127.0.0.1:52625/v1/audio/transcriptions \
   -F "file=@sample_audio.ogg" \
   -F "model=whisper-v3:turbo" | python3 -m json.tool
 ```
@@ -192,7 +234,7 @@ On a Ryzen AI 9 HX 370, a 30-second clip transcribes in ~5 seconds; the full
 docker run -it --rm \
   --device=/dev/accel/accel0 \
   --ulimit memlock=-1:-1 \
-  -v ~/.config/flm:/root/.config/flm \
+  -v "$HOME/.config/flm:/root/.config/flm:z" \
   fastflowlm run gemma3:1b --asr 1
 ```
 
@@ -213,6 +255,20 @@ The container accesses the NPU via `--device=/dev/accel/accel0`. The host
 kernel's `amdxdna` driver handles the actual hardware communication.
 
 ## Troubleshooting
+
+**Permission denied while creating the model cache**: On Fedora 44 and other
+SELinux hosts, use `-v "$HOME/.config/flm:/root/.config/flm:z"` for every
+container that uses the cache.
+
+**Connection reset after `WebServer started`**: FastFlowLM defaults to the
+container's loopback address. Pass `--host 0.0.0.0` to `fastflowlm serve` and
+check that the container-side port in `-p` matches the `--port` value. If an
+older container named `fastflowlm` is still running, stop it with
+`docker stop fastflowlm` before starting the corrected command.
+
+**XRT `*_compareelf` failures during the Docker build**: Rebuild with the
+current Dockerfile, which uses XRT's `-noctest` option to skip upstream unit
+tests during packaging.
 
 **`flm validate` shows no NPU**: Make sure you passed `--device=/dev/accel/accel0`
 and the host has the `amdxdna` driver loaded.

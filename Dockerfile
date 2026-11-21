@@ -87,7 +87,8 @@ RUN git clone --recurse-submodules https://github.com/amd/xdna-driver.git
 
 # Build XRT base (headers + libs)
 WORKDIR /build/xdna-driver/xrt/build
-RUN ./build.sh -npu -opt
+# Skip upstream unit tests during image packaging.
+RUN ./build.sh -npu -opt -noctest
 
 # Install XRT base .deb
 RUN apt-get update && apt install -y ./Release/xrt_*.deb && rm -rf /var/lib/apt/lists/*
@@ -123,7 +124,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil-dev \
     libswscale-dev \
     libswresample-dev \
-    libreadline-dev \
+    libedit-dev \
     uuid-dev \
     libdrm-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -169,7 +170,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil58 \
     libswscale7 \
     libswresample4 \
-    libreadline8t64 \
+    libedit2 \
     libdrm2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -178,7 +179,7 @@ COPY --from=xrt-builder /opt/xilinx/xrt/lib /opt/xilinx/xrt/lib
 COPY --from=xrt-builder /opt/xilinx/xrt/setup.sh /opt/xilinx/xrt/setup.sh
 
 # Add XRT libs to linker path
-ENV LD_LIBRARY_PATH="/opt/xilinx/xrt/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/xilinx/xrt/lib"
 
 # Copy FastFlowLM installation from builder
 COPY --from=flm-builder /opt/fastflowlm /opt/fastflowlm
